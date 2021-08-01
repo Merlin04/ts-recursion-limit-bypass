@@ -2,7 +2,6 @@
  * - Add webapp
  * - Add comment at the top of the file
  * - Add recursion limit option that adds an additional type parameter and will return a fallback if it reacher that limit
- * - Fix exponential limit issue
  */
 
 import { tsquery } from '@phenomnomnominal/tsquery';
@@ -23,26 +22,10 @@ type StringToNumber<T extends string, TTup extends readonly unknown[] = []>
 `;
 
 const ast = tsquery.ast(code);
-// console.log(ast);
-/*const idNode = tsquery(ast, 'TypeAliasDeclaration > Identifier');
-if (idNode.length === 0) {
-    throw new Error('No type alias declaration found in source code');
-}
-const typeIdentifier = (idNode[0] as ts.Identifier).escapedText;
-console.log(typeIdentifier);
-
-// Find references
-const references = tsquery(ast, `TypeAliasDeclaration TypeReference:has(Identifier[escapedText=${typeIdentifier}])`);
-console.log(references);
-
-// Regenerate source
-const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
-const result = printer.printNode(ts.EmitHint.Unspecified, ast, ast);
-console.log(result);*/
 
 const declarations = tsquery(ast, 'TypeAliasDeclaration');
 
-declarations.forEach(declaration => patchDeclaration(declaration as ts.TypeAliasDeclaration, 3));
+declarations.forEach(declaration => patchDeclaration(declaration as ts.TypeAliasDeclaration, 5));
 
 function getNodeIdentifier(node: ts.Node): string {
     const identifier = node.getChildren().filter(child => ts.isIdentifier(child))[0] as ts.Identifier;
@@ -51,10 +34,6 @@ function getNodeIdentifier(node: ts.Node): string {
     }
     return identifier.escapedText.toString();
 }
-
-/*function patchDeclaration(declaration: ts.TypeAliasDeclaration) {
-    patchDeclarationRecursive(declaration, getNodeIdentifier(declaration));
-}*/
 
 // Janky way of doing this
 function replaceNode(oldNode: ts.Node, newNode: ts.Node) {
@@ -90,10 +69,10 @@ function replaceNode(oldNode: ts.Node, newNode: ts.Node) {
 
 function patchDeclaration(declaration: ts.TypeAliasDeclaration, recursionCount: number = 1) {
     // Get the actual definition part of the declaration
-    //const definition = declaration.getChildren().filter(child => !ts.isIdentifier(child) && !ts.isTypeParameterDeclaration(child))[0];
     const definition = declaration.type;
+    // Clone the definition so we can use the original while we're patching
+    const templateDefinition = cloneNode(definition);
     // Get the alias' type parameters
-    //const typeParameterDefinitions = declaration.getChildren().filter(child => ts.isTypeParameterDeclaration(child));
     const typeParameterDefinitions = declaration.typeParameters ?? [];
     // Get the alias' type parameters' names
     const typeParameterNames = typeParameterDefinitions?.map(def => def.name.escapedText.toString()) ?? [];
@@ -107,11 +86,9 @@ function patchDeclaration(declaration: ts.TypeAliasDeclaration, recursionCount: 
         //@ts-expect-error
         references.forEach((reference: ts.TypeReferenceNode) => {
             // Copy type alias definition to replace the reference
-            const newNode = cloneNode(definition);
+            const newNode = cloneNode(templateDefinition);
             // Get type parameter values being passed to the type alias
-            //const typeParameters = reference.getChildren().filter(child => !ts.isIdentifier(child) && child.kind !== ts.SyntaxKind.LessThanToken);
             const typeParameters = reference.typeArguments ?? ([] as ts.TypeNode[]);
-            //const typeParameterNames = typeParameters.map(p => getNodeIdentifier(p));
             // Replace type parameter usages in newNode with the ones from the usage of the alias
             //@ts-expect-error
             const typeParameterUsages: ts.TypeReferenceNode[] = tsquery(newNode, 'TypeReference').filter(ref => typeParameterNames.includes(ref.typeName.escapedText.toString()));
@@ -132,47 +109,10 @@ function patchDeclaration(declaration: ts.TypeAliasDeclaration, recursionCount: 
                     }
                 }
 
-                /*//@ts-expect-error
-                const parent: ts.Node = typeParameterUsage._parent;
-                let done = false;
-                // Try to find what property in the parent has the usage
-                for (const property of Object.keys(parent)) {
-                    //@ts-expect-error
-                    if(Array.isArray(parent[property])) {
-                        //@ts-expect-error
-                        parent[property].forEach((child: ts.Node, index) => {
-                            if (child === typeParameterUsage) {
-                                //@ts-expect-error
-                                parent[property][index] = cloneNode(typeParameter);
-                                done = true;
-                                // Can't break because it's a .forEach loop, oh well
-                            }
-                        });
-                    //@ts-expect-error
-                    } else if (parent[property] === typeParameterUsage) {
-                        // Replace the usage with the actual parameter value
-                        //@ts-expect-error
-                        parent[property] = cloneNode(typeParameter);
-                        done = true;
-                        break;
-                    }
-                }*/
-
                 if (!replaceNode(typeParameterUsage, cloneNode(typeParameter))) {
-                    // Word salad
                     throw new Error(`Usage of type parameter ${typeParameterNames[parameterIndex]} cannot be found in any property of its parent node`);
                 }
-                //console.log(JSON.stringify(typeParameterUsage._parent));
-                //ts.factory.createTypeLiteralNode
-
-                //typeParameterUsage.parent.[typeParameterUsage.parent.indexOf(typeParameterUsage)] = typeParameter;
-
-                //const typeParameter = typeParameters.filter(p => getNodeIdentifier(p) === getNodeIdentifier(typeParameterReference))[0];
             });
-
-            //const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
-            //const result = printer.printNode(ts.EmitHint.Unspecified, newNode, ast);
-            //console.log(result);
 
             // Replace the reference with the newNode (the definition)
             replaceNode(reference, newNode);
